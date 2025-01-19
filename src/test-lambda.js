@@ -87,4 +87,141 @@ async function runTest() {
     }
 }
 
-runTest(); 
+runTest();
+
+exports.handler = async (event) => {
+    try {
+        console.log('Received event:', JSON.stringify(event, null, 2));
+        
+        if (!event.Records || event.Records.length === 0) {
+            throw new Error('No records found in event');
+        }
+
+        for (const record of event.Records) {
+            console.log('Processing raw record:', JSON.stringify(record, null, 2));
+            
+            if (!record.body) {
+                throw new Error('Empty message body received');
+            }
+
+            let body;
+            try {
+                body = JSON.parse(record.body);
+            } catch (error) {
+                console.error('Failed to parse message body:', record.body);
+                throw new Error(`Invalid JSON in message body: ${error.message}`);
+            }
+
+            console.log('Parsed message body:', JSON.stringify(body, null, 2));
+
+            // Validate message structure
+            if (!isValidOrderMessage(body)) {
+                throw new Error('Invalid order message structure');
+            }
+
+            // Format eventTime properly with better error handling
+            let eventTime;
+            try {
+                // Convert Unix timestamp to milliseconds if needed
+                let timestamp = record.attributes?.SentTimestamp || 
+                              record.eventTime || 
+                              Date.now();
+                
+                // If timestamp is a string, convert to number
+                timestamp = Number(timestamp);
+                
+                // Check if timestamp is in seconds (Unix timestamp) and convert to milliseconds
+                if (timestamp < 1e12) {
+                    timestamp *= 1000;
+                }
+                
+                eventTime = new Date(timestamp);
+                
+                // Validate the date
+                if (isNaN(eventTime.getTime())) {
+                    console.warn('Invalid timestamp, using current time');
+                    eventTime = new Date();
+                }
+
+                console.log('Processed timestamp:', {
+                    original: timestamp,
+                    converted: eventTime.toISOString(),
+                    unix: eventTime.getTime()
+                });
+
+            } catch (error) {
+                console.warn('Error processing timestamp:', error);
+                eventTime = new Date();
+            }
+
+            // Create order document
+            const orderDoc = {
+                messageId: record.messageId,
+                eventSource: record.eventSource || 'aws:sqs',
+                eventTime: eventTime,
+                body: body,
+                status: 'PROCESSING'
+            };
+
+            console.log('Created order document:', JSON.stringify(orderDoc, null, 2));
+
+            // Process the order
+            await processOrder(orderDoc);
+
+            // Update status in MongoDB
+            await updateOrderStatus(record.messageId, 'COMPLETED');
+        }
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ message: 'Order processed successfully' })
+        };
+    } catch (error) {
+        console.error('Error processing order:', {
+            error: error.message,
+            stack: error.stack,
+            type: error.constructor.name
+        });
+        
+        if (event.Records && event.Records[0]) {
+            await updateOrderStatus(event.Records[0].messageId, 'FAILED', error.message);
+        }
+
+        throw error;
+    }
+};
+
+// Helper function to validate order message structure
+function isValidOrderMessage(message) {
+    if (!message || typeof message !== 'object') {
+        console.error('Message is not an object');
+        return false;
+    }
+
+    const requiredFields = ['action', 'customerId', 'items', 'totalAmount'];
+    const missingFields = requiredFields.filter(field => !message[field]);
+
+    if (missingFields.length > 0) {
+        console.error('Missing required fields:', missingFields);
+        return false;
+    }
+
+    if (!Array.isArray(message.items) || message.items.length === 0) {
+        console.error('Items must be a non-empty array');
+        return false;
+    }
+
+    const validItems = message.items.every(item => 
+        item.productId && 
+        item.name && 
+        typeof item.quantity === 'number' && 
+        typeof item.price === 'number'
+    );
+
+    if (!validItems) {
+        console.error('Invalid items structure');
+        return false;
+    }
+
+    return true;
+} 
