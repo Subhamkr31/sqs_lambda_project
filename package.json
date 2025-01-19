@@ -1,0 +1,20 @@
+{
+  "name": "sqs-implementation",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.731.1",
+    "@aws-sdk/client-lambda": "^3.731.1",
+    "@aws-sdk/client-sqs": "^3.0.0",
+    "archiver": "^7.0.1",
+    "dotenv": "^16.0.0",
+    "mongoose": "^8.9.5"
+  }
+}
